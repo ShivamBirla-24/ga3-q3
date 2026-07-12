@@ -17,8 +17,12 @@ app.add_middleware(
 )
 
 # --- 2. AI PIPE CONFIGURATION ---
+# Leave the word "AIPIPE_TOKEN" exactly as it is here. 
+# Do NOT paste your actual token into this file!
+token = os.environ.get("AIPIPE_TOKEN", "missing-token")
+
 client = OpenAI(
-    api_key=os.environ.get("eyJhbGciOiJIUzI1NiJ9.eyJlbWFpbCI6IjI1ZHMzMDAwMDQ2QGRzLnN0dWR5LmlpdG0uYWMuaW4iLCJpYXQiOjE3ODM4NzI0NzgsImlzcyI6Imh0dHBzOi8vYWlwaXBlLm9yZyIsImF1ZCI6ImFpcGlwZS1hcGkiLCJleHAiOjE3ODQ0NzcyNzh9.-r0xbZdXFGOOa6JAWV0BT0xrml9KaUZIhx4FrFbmmD0"),
+    api_key=token, 
     base_url="https://aipipe.org/openai/v1"
 )
 
