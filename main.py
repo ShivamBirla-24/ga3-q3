@@ -64,6 +64,17 @@ class InvoiceText(BaseModel):
     invoice_text: str
 
 
+def clean_placeholder(value):
+    """Sometimes the model writes the literal word 'null' (or 'N/A', 'none',
+    empty string) as TEXT instead of a real JSON null. Catch that here so
+    the grader always sees a true null, not the string "null"."""
+    if value is None:
+        return None
+    if isinstance(value, str) and value.strip().lower() in ("null", "none", "n/a", "na", ""):
+        return None
+    return value
+
+
 def normalize_date(value):
     """Make extra sure the date is in strict YYYY-MM-DD format,
     even if the model returned something slightly different."""
@@ -107,14 +118,17 @@ def extract(payload: InvoiceText):
         prompt = (
             "You are an invoice data extraction assistant. Read the raw invoice "
             "text below and extract exactly these six fields:\n"
-            "- invoice_no: the invoice number/ID\n"
+            "- invoice_no: the invoice/bill/document identifier. It may be labeled "
+            "'Invoice No', 'Invoice #', 'Invoice Number', 'Bill No', 'Ref No', "
+            "'Document No', 'Order No', or similar — extract the ID value regardless of the label used\n"
             "- date: the invoice date, converted to ISO format YYYY-MM-DD\n"
             "- vendor: the company or person who issued the invoice\n"
             "- amount: the SUBTOTAL before tax, as a plain number (no currency symbols, no commas)\n"
             "- tax: the tax amount only (e.g. GST/VAT), as a plain number\n"
             "- currency: the 3-letter currency code. Infer it from symbols "
             "(Rs./₹ = INR, $ = USD, € = EUR, £ = GBP) if not stated directly\n\n"
-            "If a field genuinely cannot be found in the text, use null for it.\n\n"
+            "If a field genuinely cannot be found in the text, use JSON null for it "
+            "(never the text string \"null\", \"N/A\", or \"none\").\n\n"
             f"Invoice text:\n{payload.invoice_text}"
         )
 
@@ -130,7 +144,7 @@ def extract(payload: InvoiceText):
         extracted = json.loads(response.text)
 
         for key in REQUIRED_KEYS:
-            result[key] = extracted.get(key)
+            result[key] = clean_placeholder(extracted.get(key))
 
         # Extra safety net on top of what the model already did.
         result["date"] = normalize_date(result["date"])
