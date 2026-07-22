@@ -110,6 +110,22 @@ def home():
 # --- 4. The actual endpoint the grader will call ---
 @app.post("/extract")
 def extract(payload: InvoiceText):
+    result, _ = run_extraction(payload.invoice_text)
+    return result
+
+
+# --- TEMPORARY debug endpoint: same logic, but also shows the real error.
+# The grader only calls /extract, so this is safe to leave in, but you
+# can delete this whole function once things are working.
+@app.post("/extract-debug")
+def extract_debug(payload: InvoiceText):
+    result, error = run_extraction(payload.invoice_text)
+    result["_debug_error"] = error
+    return result
+
+
+def run_extraction(invoice_text: str):
+    """Does the actual work. Returns (result_dict, error_message_or_None)."""
     # Start with all 6 keys set to null. Whatever happens below,
     # we always return this same shape.
     result = {key: None for key in REQUIRED_KEYS}
@@ -129,7 +145,7 @@ def extract(payload: InvoiceText):
             "(Rs./₹ = INR, $ = USD, € = EUR, £ = GBP) if not stated directly\n\n"
             "If a field genuinely cannot be found in the text, use JSON null for it "
             "(never the text string \"null\", \"N/A\", or \"none\").\n\n"
-            f"Invoice text:\n{payload.invoice_text}"
+            f"Invoice text:\n{invoice_text}"
         )
 
         response = client.models.generate_content(
@@ -151,12 +167,13 @@ def extract(payload: InvoiceText):
         result["amount"] = normalize_number(result["amount"])
         result["tax"] = normalize_number(result["tax"])
 
-    except Exception as e:
-        # Something went wrong (bad API key, network issue, etc).
-        # We still return all 6 keys (as nulls) - never crash the response shape.
-        # The error is printed to Render's logs so you can debug it,
-        # but is NOT added to the JSON response, since the spec requires
-        # exactly these 6 keys.
-        print(f"extract() error: {e}")
+        return result, None
 
-    return result
+    except Exception as e:
+        # Something went wrong (bad API key, network issue, model refused
+        # to produce valid JSON, etc). We still return all 6 keys as nulls,
+        # so the response shape is never broken - but we now ALSO return
+        # the real error message via the second value, so /extract-debug
+        # can show it to you.
+        print(f"extract() error: {e}")
+        return result, str(e)
