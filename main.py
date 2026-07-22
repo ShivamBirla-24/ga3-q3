@@ -1,6 +1,7 @@
 import os
 import json
 import re
+import time
 from datetime import datetime
 
 from fastapi import FastAPI
@@ -23,7 +24,7 @@ app.add_middleware(
 # --- 2. Set up the AI client ---
 # The API key is read from an environment variable (set this on Render, never in code!)
 client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
-MODEL_NAME = "gemini-2.5-flash"
+MODEL_NAME = "gemini-2.5-flash-lite"  # much higher free-tier quota than gemini-2.5-flash
 
 # The 6 keys the assignment requires, always in the response.
 REQUIRED_KEYS = ["invoice_no", "date", "vendor", "amount", "tax", "currency"]
@@ -148,14 +149,29 @@ def run_extraction(invoice_text: str):
             f"Invoice text:\n{invoice_text}"
         )
 
-        response = client.models.generate_content(
-            model=MODEL_NAME,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                response_schema=RESPONSE_SCHEMA,
-            ),
-        )
+        response = None
+        last_error = None
+        for attempt in range(3):
+            try:
+                response = client.models.generate_content(
+                    model=MODEL_NAME,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        response_schema=RESPONSE_SCHEMA,
+                    ),
+                )
+                break  # success, stop retrying
+            except Exception as api_error:
+                last_error = api_error
+                # Only retry on rate-limit (429) or temporary server (503) errors.
+                if "429" in str(api_error) or "503" in str(api_error):
+                    time.sleep(2 * (attempt + 1))  # wait a bit longer each retry
+                    continue
+                raise  # any other error: fail immediately, don't retry
+
+        if response is None:
+            raise last_error
 
         extracted = json.loads(response.text)
 
