@@ -24,7 +24,10 @@ app.add_middleware(
 # --- 2. Set up the AI client ---
 # The API key is read from an environment variable (set this on Render, never in code!)
 client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
-MODEL_NAME = "gemini-2.5-flash-lite"  # much higher free-tier quota than gemini-2.5-flash
+# Gemini model names change fairly often as Google ships new versions and
+# retires old ones. Try these in order — if the first one is unavailable
+# (404) or overloaded, fall back to the next.
+MODEL_CANDIDATES = ["gemini-3.1-flash-lite", "gemini-3-flash", "gemini-2.5-flash"]
 
 # The 6 keys the assignment requires, always in the response.
 REQUIRED_KEYS = ["invoice_no", "date", "vendor", "amount", "tax", "currency"]
@@ -151,24 +154,34 @@ def run_extraction(invoice_text: str):
 
         response = None
         last_error = None
-        for attempt in range(3):
-            try:
-                response = client.models.generate_content(
-                    model=MODEL_NAME,
-                    contents=prompt,
-                    config=types.GenerateContentConfig(
-                        response_mime_type="application/json",
-                        response_schema=RESPONSE_SCHEMA,
-                    ),
-                )
-                break  # success, stop retrying
-            except Exception as api_error:
-                last_error = api_error
-                # Only retry on rate-limit (429) or temporary server (503) errors.
-                if "429" in str(api_error) or "503" in str(api_error):
-                    time.sleep(2 * (attempt + 1))  # wait a bit longer each retry
-                    continue
-                raise  # any other error: fail immediately, don't retry
+
+        for model_name in MODEL_CANDIDATES:
+            model_worked = False
+            for attempt in range(2):  # up to 2 tries per model
+                try:
+                    response = client.models.generate_content(
+                        model=model_name,
+                        contents=prompt,
+                        config=types.GenerateContentConfig(
+                            response_mime_type="application/json",
+                            response_schema=RESPONSE_SCHEMA,
+                        ),
+                    )
+                    model_worked = True
+                    break  # success, stop retrying this model
+                except Exception as api_error:
+                    last_error = api_error
+                    if "429" in str(api_error) or "503" in str(api_error):
+                        # Rate-limited or temporarily overloaded: wait, then retry same model.
+                        time.sleep(2 * (attempt + 1))
+                        continue
+                    if "404" in str(api_error) or "NOT_FOUND" in str(api_error):
+                        # This model name doesn't exist (anymore) - stop
+                        # retrying it and move on to the next candidate.
+                        break
+                    raise  # any other error: fail immediately
+            if model_worked:
+                break  # got a working response, no need to try more models
 
         if response is None:
             raise last_error
